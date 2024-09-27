@@ -2,41 +2,34 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageFont, ImageTk
-import xml.etree.ElementTree as ET
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 class CarteirinhaApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Gerador de Carteirinha")
-
-        # Configura o tamanho fixo da janela
         self.root.geometry("800x600")
 
-        # Inicializando a variável da foto e o caminho da imagem de fundo
         self.foto_path = None
         self.card_image = None
         self.background_image_path = "fundo.jpg"
 
-        # Criar diretório de dados XML se não existir
-        self.xml_file = 'alunos.xml'
-        try:
-            with open(self.xml_file, 'r') as f:
-                pass
-        except FileNotFoundError:
-            with open(self.xml_file, 'w') as f:
-                f.write('<alunos></alunos>')
+        self.init_firebase()
 
-        # Frame principal
         self.main_frame = ctk.CTkFrame(root, width=800, height=600)
         self.main_frame.pack(fill=ctk.BOTH, expand=True)
         self.create_widgets()
 
+    def init_firebase(self):
+        cred = credentials.Certificate('c:\\Users\\ruan_\\Desktop\\PASTA\\firebase.json')
+        firebase_admin.initialize_app(cred)
+        self.db = firestore.client()
+
     def create_widgets(self):
-        # Limpar o conteúdo do frame principal
         for widget in self.main_frame.winfo_children():
             widget.destroy()
 
-        # Frame para os campos de entrada
         form_frame = ctk.CTkFrame(self.main_frame, width=400, height=300)
         form_frame.pack(side=ctk.LEFT, fill=ctk.BOTH, padx=20, pady=20, expand=True)
 
@@ -58,9 +51,8 @@ class CarteirinhaApp:
 
         ctk.CTkButton(form_frame, text="Selecionar Foto", command=self.select_photo).grid(row=4, column=0, columnspan=2, pady=5)
 
-        ctk.CTkButton(form_frame, text="Gerar Carteirinha", command=self.generate_id_card).grid(row=5, column=0, columnspan=2, pady=5)
+        ctk.CTkButton(form_frame, text="Salvar aluno", command=self.generate_id_card).grid(row=5, column=0, columnspan=2, pady=5)
 
-        # Frame para a pré-visualização
         self.preview_frame = ctk.CTkFrame(self.main_frame, width=400, height=300)
         self.preview_frame.pack(side=ctk.RIGHT, fill=ctk.BOTH, padx=20, pady=20, expand=True)
 
@@ -69,9 +61,8 @@ class CarteirinhaApp:
 
         self.save_button = ctk.CTkButton(self.preview_frame, text="Salvar Carteirinha", command=self.save_image)
         self.save_button.pack(pady=10)
-        self.save_button.pack_forget()  # Esconde o botão inicialmente
+        self.save_button.pack_forget()  
 
-        # Frame para busca e listagem de alunos
         search_frame = ctk.CTkFrame(self.main_frame, width=800, height=100)
         search_frame.pack(side=ctk.BOTTOM, fill=ctk.X, padx=20, pady=10)
 
@@ -94,42 +85,31 @@ class CarteirinhaApp:
         ra = self.ra_entry.get()
         serie = self.serie_entry.get()
 
-        # Tamanho da fonte padrão
         font_size = 15
 
-        # Criando a imagem da carteirinha
         width, height = 350, 200
         card = Image.new('RGB', (width, height), color=(255, 255, 255))
 
-        # Carregando a imagem de fundo
         try:
             background = Image.open(self.background_image_path)
             background = background.resize((width, height))
             card.paste(background, (0, 0))
         except Exception as e:
             print(f"Erro ao carregar imagem de fundo: {e}")
-
         draw = ImageDraw.Draw(card)
-
-        # Carregando a fonte com o tamanho especificado
         try:
             font = ImageFont.truetype("arial.ttf", font_size)
         except IOError:
             font = ImageFont.load_default()
 
-        # Ajuste vertical
         ajuste_vertical = 25
         
-        # Adicionando texto padrão
         draw.text((70, 25), "EMIEF - Antônio Felix Gonçalves", font=font, fill=(0, 0, 0))
-
-        # Adicionando texto personalizado com ajuste vertical
         draw.text((155, 45 + ajuste_vertical), f"Nome: {nome}", font=font, fill=(0, 0, 0))
         draw.text((155, 65 + ajuste_vertical), f"Sobrenome: {sobrenome}", font=font, fill=(0, 0, 0))
         draw.text((155, 85 + ajuste_vertical), f"R.A: {ra}", font=font, fill=(0, 0, 0))
         draw.text((155, 105 + ajuste_vertical), f"Série: {serie}", font=font, fill=(0, 0, 0))
 
-        # Adicionando a foto (se disponível)
         if self.foto_path:
             try:
                 foto = Image.open(self.foto_path)
@@ -138,20 +118,14 @@ class CarteirinhaApp:
             except Exception as e:
                 print(f"Erro ao carregar foto: {e}")
 
-        # Atualizando a pré-visualização e salvando a imagem
         self.card_image = card
         self.update_preview(card)
-        
-        # Armazenar aluno no XML
-        self.store_student(nome, sobrenome, ra, serie, self.foto_path)
+        self.store_student_firebase(nome, sobrenome, ra, serie, self.foto_path)
 
     def update_preview(self, card):
-        # Convertendo a imagem para o formato CustomTkinter
         card_tk = ImageTk.PhotoImage(card)
         self.image_label.configure(image=card_tk)
         self.image_label.image = card_tk
-
-        # Mostrar o botão de salvar
         self.save_button.pack(pady=10)
 
     def save_image(self):
@@ -160,49 +134,32 @@ class CarteirinhaApp:
             if file_path:
                 self.card_image.save(file_path)
 
-    def store_student(self, nome, sobrenome, ra, serie, foto_path):
-        # Cria ou atualiza o arquivo XML com informações do aluno
-        try:
-            tree = ET.parse(self.xml_file)
-            root = tree.getroot()
-        except ET.ParseError:
-            root = ET.Element("alunos")
-        
-        aluno = ET.SubElement(root, "aluno")
-        ET.SubElement(aluno, "nome").text = nome
-        ET.SubElement(aluno, "sobrenome").text = sobrenome
-        ET.SubElement(aluno, "ra").text = ra
-        ET.SubElement(aluno, "serie").text = serie
-        ET.SubElement(aluno, "foto").text = foto_path
-
-        tree = ET.ElementTree(root)
-        tree.write(self.xml_file)
+    def store_student_firebase(self, nome, sobrenome, ra, serie, foto_path):
+        aluno_data = {
+            "nome": nome,
+            "sobrenome": sobrenome,
+            "ra": ra,
+            "serie": serie,
+            "foto": foto_path
+        }
+        self.db.collection("alunos").document(ra).set(aluno_data)
+        print(f"Aluno {nome} {sobrenome} armazenado no Firebase com sucesso.")
 
     def search_students(self):
         ra_query = self.search_entry.get().strip()
         self.results_listbox.delete(0, tk.END)
-        
-        print(f"Procurando R.A: {ra_query}")  # Mensagem de depuração
-        
-        try:
-            tree = ET.parse(self.xml_file)
-            root = tree.getroot()
-            
-            found = False
-            for aluno in root.findall('aluno'):
-                aluno_ra = aluno.find('ra').text
-                aluno_nome = aluno.find('nome').text
-                print(f"Encontrado aluno com R.A: {aluno_ra}, Nome: {aluno_nome}")  # Mensagem de depuração
-                
-                if ra_query == aluno_ra:
-                    self.results_listbox.insert(tk.END, f"{aluno_nome} (R.A: {aluno_ra})")
-                    found = True
-            
-            if not found:
-                self.results_listbox.insert(tk.END, "Nenhum aluno encontrado.")
-                
-        except Exception as e:
-            print(f"Erro ao buscar alunos: {e}")
+
+        print(f"Procurando R.A: {ra_query}")
+
+        alunos_ref = self.db.collection("alunos")
+        results = alunos_ref.where("ra", "==", ra_query).get()
+
+        if not results:
+            self.results_listbox.insert(tk.END, "Nenhum aluno encontrado.")
+        else:
+            for doc in results:
+                aluno = doc.to_dict()
+                self.results_listbox.insert(tk.END, f"{aluno['nome']} (R.A: {aluno['ra']})")
 
     def on_listbox_select(self, event):
         selected_index = self.results_listbox.curselection()
@@ -212,34 +169,26 @@ class CarteirinhaApp:
             self.generate_id_card_for_ra(ra)
 
     def generate_id_card_for_ra(self, ra):
-        # Gere a carteirinha baseada no R.A selecionado
-        try:
-            tree = ET.parse(self.xml_file)
-            root = tree.getroot()
-            for aluno in root.findall('aluno'):
-                aluno_ra = aluno.find('ra').text
-                if aluno_ra == ra:
-                    nome = aluno.find('nome').text
-                    sobrenome = aluno.find('sobrenome').text
-                    serie = aluno.find('serie').text
-                    foto_path = aluno.find('foto').text
+        doc = self.db.collection("alunos").document(ra).get()
 
-                    # Atualizar as entradas com os dados do aluno
-                    self.nome_entry.delete(0, tk.END)
-                    self.nome_entry.insert(0, nome)
-                    self.sobrenome_entry.delete(0, tk.END)
-                    self.sobrenome_entry.insert(0, sobrenome)
-                    self.ra_entry.delete(0, tk.END)
-                    self.ra_entry.insert(0, ra)
-                    self.serie_entry.delete(0, tk.END)
-                    self.serie_entry.insert(0, serie)
-                    self.foto_path = foto_path
+        if doc.exists:
+            aluno = doc.to_dict()
+            nome = aluno['nome']
+            sobrenome = aluno['sobrenome']
+            serie = aluno['serie']
+            foto_path = aluno['foto']
 
-                    # Gerar a carteirinha com os dados do aluno
-                    self.generate_id_card()
-                    break
-        except Exception as e:
-            print(f"Erro ao gerar carteirinha para R.A {ra}: {e}")
+            self.nome_entry.delete(0, tk.END)
+            self.nome_entry.insert(0, nome)
+            self.sobrenome_entry.delete(0, tk.END)
+            self.sobrenome_entry.insert(0, sobrenome)
+            self.ra_entry.delete(0, tk.END)
+            self.ra_entry.insert(0, ra)
+            self.serie_entry.delete(0, tk.END)
+            self.serie_entry.insert(0, serie)
+            self.foto_path = foto_path
+
+            self.generate_id_card()
 
 if __name__ == "__main__":
     root = ctk.CTk()
